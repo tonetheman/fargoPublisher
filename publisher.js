@@ -8,6 +8,7 @@ var urlpack = require ("url");
 var AWS = require ("aws-sdk");
 var s3 = new AWS.S3 ();
 var dns = require ("dns");
+var fs = require("./fileStorage");
 
 var globals = new Object (); //4/23/14 by DW
 
@@ -20,6 +21,14 @@ var s3NamesPath = s3DataPath + "names/";
 var s3StatsPath = s3DataPath + "stats/"; 
 var s3SPrefsPath = s3DataPath + "prefs/"; 
 var s3SScriptsPath = s3DataPath + "scripts/"; //4/5/14 by DW
+var use_fs = false;
+
+if (process.env.FARGO_DATA == undefined) {
+} else {
+	console.log("TC: using file system now!");
+	use_fs = true;
+	fs.setDataDirectory(process.env.FARGO_DATA);
+}
 
 var myDomain = process.env.fpDomain; //something like smallpict.com
 
@@ -215,11 +224,21 @@ function s3NewObject (path, data, type, acl, callback) {
 		Bucket: splitpath.Bucket,
 		Key: splitpath.Key
 		};
-	s3.putObject (params, function (err, data) { 
-		if (callback != undefined) {
-			callback (err, data);
+	if (use_fs) {
+		fs.putFileObject(params, function(err,data) {
+		console.log("s3NewObject: err: " + err);
+		console.log("s3NewObject: data: "  + data);
+			if (callback!=undefined) {
+				callback(err,data);
 			}
 		});
+	} else {
+		s3.putObject (params, function (err, data) { 
+			if (callback != undefined) {
+				callback (err, data);
+				}
+			});
+		}
 	}
 function s3Redirect (path, url) { //1/30/14 by DW -- doesn't appear to work -- don't know why
 	var splitpath = s3SplitPath (path);
@@ -229,14 +248,19 @@ function s3Redirect (path, url) { //1/30/14 by DW -- doesn't appear to work -- d
 		Key: splitpath.Key,
 		Body: " "
 		};
-	s3.putObject (params, function (err, data) { 
-		if (err != null) {
-			consoleLog ("s3Redirect: err.message = " + err.message + ".");
-			}
-		else {
-			consoleLog ("s3Redirect: path = " + path + ", url = " + url + ", data = ", JSON.stringify (data));
-			}
+	if (use_fs) {
+		fs.putFileObject(params, function(err, data) {
 		});
+	} else {
+		s3.putObject (params, function (err, data) { 
+			if (err != null) {
+				consoleLog ("s3Redirect: err.message = " + err.message + ".");
+				}
+			else {
+				consoleLog ("s3Redirect: path = " + path + ", url = " + url + ", data = ", JSON.stringify (data));
+				}
+			});
+	}
 	}
 function s3GetObjectMetadata (path, callback) {
 	var params = s3SplitPath (path);
@@ -246,9 +270,22 @@ function s3GetObjectMetadata (path, callback) {
 	}
 function s3GetObject (path, callback) {
 	var params = s3SplitPath (path);
+	if (use_fs) {
+		console.log("TC: trying to get now: " + JSON.stringify(params));
+		fs.getFileObject(params, function(err,data) {
+			console.log("s3GetObject.fs: " + data);
+			console.log("s3GetObject.fs.err: " + err);
+			if (err) {
+			callback(null);
+			} else {
+				callback(JSON.parse(data));
+			}
+		});
+	} else {
 	s3.getObject (params, function (err, data) {
 		callback (data);
 		});
+	}
 	}
 function updateNameRecord (name, obj, callback) { 
 	s3NewObject (s3NamesPath + name + ".json", JSON.stringify (obj, undefined, 3), "text/plain", "public-read", function (err, data) {
@@ -361,6 +398,7 @@ function statsAddToHttpLog (httpRequest, urlRedirect, errorMessage, startTime) {
 	}
 function loadServerStats () {
 	s3GetObject (s3StatsPath + nameHttpLogFile, function (data) {
+		console.log("loadServerStats: data.Body: " + data.Body);
 		if (data != null) {
 			serverStats = JSON.parse (data.Body);
 			serverStats.ctHitsThisRun = 0;
@@ -468,6 +506,7 @@ function handlePackagePing (subdomain) { //something like http://dave.smallpict.
 	console.log ("Domain == " + myDomain + ".");
 	console.log ("Port == " + myPort + ".");
 	console.log ("Redirect == " + getBoolean (flRedirect) + ".");
+	console.log("Use file system " + use_fs);
 	
 	
 	console.log ("");
